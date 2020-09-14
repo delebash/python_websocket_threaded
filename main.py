@@ -1,33 +1,79 @@
+import sys
 
-import websocket
-from threading import Thread, Event
+# python -m pip install PySide2  #
+
+from PySide2.QtWidgets import (QLineEdit, QPushButton, QApplication,
+                               QVBoxLayout, QDialog)
+from PySide2.QtCore import *
+
+# python -m pip install "python-socketio[client]"  #
+
+import socketio
 
 url = 'ws://localhost:5000'
 transport = 'websocket'
 myroom = "pythonclient"
 
+sio = socketio.Client()
 
-class StartConnect(object):
-    def __init__(self):
-        """Constructor"""
-        self.host = ''
 
-        self.ws = None
+class Form(QDialog):
+    def __init__(self, parent=None):
+        super(Form, self).__init__(parent)
+        self.startbutton = QPushButton("start")
+        self.stopbutton = QPushButton("stop")
+        self.setFixedSize(300, 300)
+        # Create layout and add widgets
+        layout = QVBoxLayout()
+        layout.addWidget(self.startbutton)
+        layout.addWidget(self.stopbutton)
+        # Set dialog layout
+        self.setLayout(layout)
+        # Add button signal to greetings slot
+        self.startbutton.clicked.connect(self.start)
+        self.stopbutton.clicked.connect(self.stop)
 
-    def connect(self):
-        self.host = url
-        self.ws = websocket.WebSocketApp(self.host,
-                                         on_message=self.on_message,
-                                         on_open=self.on_open)
+    def start(self):
+        self.startclient(url, myroom, transport)
 
-        self.thread = Thread(target=self.ws.run_forever, args=(None, None, 60, 30))
-        self.thread.start()
+    def stop(self):
+        self.stopclient()
 
-    def on_open(self, ws):
-        print('open')
+    def startclient(self, url, myroom, transport):
+        my_thread = DummyWorker()
 
-    def on_message(self, ws, message):
-        print('msg')
+        if sio.sid:
+            my_thread.logger_emiter.emit("Already connected")
+
+        else:
+            sio.connect(url, transports=transport)
+
+            @sio.on('connect')
+            def connect():
+                my_thread.logger_emiter.emit("'Connected id  " + sio.sid)
+                sio.emit('room', myroom)
+                my_thread.logger_emiter.emit('Joined room  '+ myroom)
+
+            @sio.on('message')
+            def message(data):
+                my_thread.logger_emiter.emit('Received message!' + data)
+
+            @sio.on('join')
+            def join(room):
+                my_thread.logger_emiter.emit('Joined room  ' + room)
+
+            @sio.on('connect_error')
+            def connect_error():
+                my_thread.logger_emiter.emit("Connection failed!")
+
+            @sio.on('disconnect')
+            def disconnect():
+                my_thread.logger_emiter.emit("Disconnected!")
+                sio.disconnect()
+
+    def stopclient(self):
+        print('Stop Client')
+        sio.disconnect()
 
 
 class DummyWorker(QThread):
@@ -47,49 +93,10 @@ class DummyWorker(QThread):
         # else iClone crashes because it logs to UI thread
         print(s)
 
-    # def run(self):
-    #     # time.sleep(2)
-    #     # print(f"worker finished.") crashes - no printing from another thread in iClone!
-    #     self.logger_emiter.emit("DummyWorker slept")
-    @staticmethod
-    def connectserver():
-        my_thread = DummyWorker()
-        my_thread.logger_emiter.emit("connecting")
 
-        if sio.sid:
-            my_thread.logger_emiter.emit("Already connected")
-        else:
-            sio.connect(url, transports=transport)
+app = QApplication(sys.argv)
 
-        # Note: print statment crashes iClone main thread need to do print statment on different thread
-        # https://forum.reallusion.com/443699/Python-API-background-threads-crashing
+window = Form()
+window.show()
 
-        @sio.on('connect')
-        def connect():
-            my_thread.logger_emiter.emit("connected")
-            sio.emit('room', myroom)
-            # print('Joined room  ' + myroom)
-
-        @sio.on('message')
-        def message(data):
-            my_thread.logger_emiter.emit('data')
-            # # print('Received message!', data)
-            # proccessmocapdata(data)
-
-        @sio.on('join')
-        def join(room):
-            print('Joined room  ', room)
-        #
-        # @sio.on('connect_error')
-        # def connect_error():
-        #     print("Connection failed!")
-
-        @sio.on('disconnect')
-        def disconnect():
-            my_thread.logger_emiter.emit("Disconnected")
-            sio.disconnect()
-
-
-def stopclient():
-    print("Client stopped!")
-    sio.disconnect()
+app.exec_()
